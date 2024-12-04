@@ -1,0 +1,396 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description:
+  This template will deploy the infrastructure needed to test GuardDuty. The test is that GD will alert to a network scan across the local infrastructure.
+
+# Metadata:
+#   template metadata
+
+Parameters:
+  DeleteInXHours:
+    Description: Setting to true will create infrastructure needed to delete the stack and it's infrastructure two hours after deployment.
+    Type: String
+    Default: 'Yes'
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+  HoursToDeleteIn:
+    Description: Defines how many hours to delete the infrastructure
+    Type: Number
+    Default: 2
+  Region:
+    Description: The AWS region to utilize
+    Type: String
+    Default: us-west-2
+  SubnetAvailabilityZone:
+    Description: The availability zone for the subnet
+    Type: String
+    Default: us-west-2a
+  VpcCidr:
+    Description: The network range (CIDR) for the environment
+    Type: String
+    Default: 10.0.0.0/16
+  PublicSubnetCidr:
+    Description: The network range (CIDR) for the environment
+    Type: String
+    Default: 10.0.1.0/24
+  PrivateSubnetCidr:
+    Description: The network range (CIDR) for the environment
+    Type: String
+    Default: 10.0.2.0/24
+  EC2AmiId:
+    Description: AMI ID for both ec2 instances, default AL 2023
+    Type: String
+    Default: ami-055e3d4f0bbeb5878
+
+Conditions:
+  DeleteStack: 
+    !Equals 
+      - !Ref DeleteInXHours
+      - 'Yes'
+
+Resources:
+  #####################################
+  # GuardDuty
+  #####################################
+  ### NEED TO ENABLE RUNTIME EC2 SCANNING
+  SecurityAccountGuardDuty:
+    Type: AWS::GuardDuty::Detector
+    Properties:
+      # DataSources: 
+      #     Kubernetes: 
+      #       AuditLogs:
+      #         Enable: false
+      #     MalwareProtection: 
+      #         ScanEc2InstanceWithFindings: 
+      #           EbsVolumes: true
+      #     S3Logs: 
+      #       Enable: true
+      Enable: true
+      Features: 
+        - Name: RUNTIME_MONITORING
+          Status: ENABLED
+          AdditionalConfiguration:
+            - Name: EC2_AGENT_MANAGEMENT
+              Status: ENABLED
+      FindingPublishingFrequency: FIFTEEN_MINUTES
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+
+  #####################################
+  # VPC
+  #####################################
+  SecurityVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      # InstanceTenacy: default
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityVPC
+
+  #####################################
+  # Subnets
+  #####################################
+  SecurityPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AssignIpv6AddressOnCreation: false
+      AvailabilityZone: !Ref SubnetAvailabilityZone
+      CidrBlock: !Ref PrivateSubnetCidr
+      EnableDns64: false
+      MapPublicIpOnLaunch: false
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityPrivateSubnet
+      VpcId: !Ref SecurityVPC
+  SecurityPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AssignIpv6AddressOnCreation: false
+      AvailabilityZone: !Ref SubnetAvailabilityZone
+      CidrBlock: !Ref PublicSubnetCidr
+      EnableDns64: false
+      MapPublicIpOnLaunch: true
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityPublicSubnet
+      VpcId: !Ref SecurityVPC
+
+  #####################################
+  # IGW
+  #####################################
+  SecurityIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityIGW
+  IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref SecurityVPC
+      InternetGatewayId: !Ref SecurityIGW
+  
+  #####################################
+  # Elastic IP
+  #####################################
+  NATGWEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityEIP
+
+  #####################################
+  # NAT GW
+  #####################################
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGWEIP.AllocationId
+      ConnectivityType: public
+      SubnetId: !Ref SecurityPublicSubnet
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityNatGateway
+
+  #####################################
+  # Route tables
+  #####################################
+  SecurityPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityPublicRouteTable
+      VpcId: !Ref SecurityVPC
+
+  SecurityPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityPrivateRouteTable
+      VpcId: !Ref SecurityVPC
+
+  #####################################
+  # Route table routes
+  #####################################
+  PrivateRouteToNATRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref SecurityPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PublicRouteToIGW:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref SecurityPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SecurityIGW
+
+  #####################################
+  # Route table associations
+  #####################################
+  PrivateRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SecurityPrivateSubnet
+      RouteTableId: !Ref SecurityPrivateRouteTable
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SecurityPublicSubnet
+      RouteTableId: !Ref SecurityPublicRouteTable
+
+  #####################################
+  # Security Group
+  #####################################
+  AllowOutboundTrafficSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: AllowOutboundTraffic
+      GroupDescription: Allows outbound traffic.
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: '0.0.0.0/0'
+      VpcId: !Ref SecurityVPC
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+
+  #####################################
+  # EC2 Session Manager Role
+  #####################################
+  SecurityEc2SsmRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'SecurityEc2SsmRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'ec2.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+
+  SecurityInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref SecurityEc2SsmRole
+
+  #####################################
+  # EC2 Scanner
+  #####################################
+  SecurityEC2Scanner:
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile: !Ref SecurityInstanceProfile
+      ImageId: !Ref EC2AmiId
+      InstanceType: t2.micro
+      Monitoring: false
+      SecurityGroupIds:
+        - !Ref AllowOutboundTrafficSG
+      SubnetId: !Ref SecurityPrivateSubnet
+      UserData: !Base64 |
+        !/bin/bash -ex
+        dnf update
+        dnf install nmap
+
+      #   nmap -sV 10.0.0.0/24
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityNmapScanner
+  # EC2 Scannee
+  SecurityEC2Scannee:
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile: !Ref SecurityInstanceProfile
+      ImageId: !Ref EC2AmiId
+      InstanceType: t2.micro
+      Monitoring: false
+      SecurityGroupIds:
+        - !Ref AllowOutboundTrafficSG
+      SubnetId: !Ref SecurityPrivateSubnet
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityClientServer
+  
+  #####################################
+  # EventBridge Scheduler
+  #####################################
+
+Outputs:
+  GuardDutyID:
+    Description: The Detector ID for GuardDuty
+    Value: !Ref SecurityAccountGuardDuty
+  VPCID:
+    Description: The ID of the security VPC
+    Value: !Ref SecurityVPC
+  PrivateSubnetID: 
+    Description: The ID of the subnet
+    Value: !Ref SecurityPrivateSubnet
+  PublicSubnetID: 
+    Description: The ID of the subnet
+    Value: !Ref SecurityPublicSubnet
+  IGWID:
+    Description: ID of the security IGW
+    Value: !Ref SecurityIGW
+  VPCGatewayAttachmentID:
+    Description: the ID of the attachment between the VPC and IGW
+    Value: !Ref IGWAttachment
+  NATGatewayIP:
+    Description: EIP for the NAT Gateway
+    Value: !Ref NATGWEIP
+  NATGatewayID:
+    Description: the ID of the NAT gateway
+    Value: !Ref NATGateway
+  PublicRouteTableID:
+    Description: ID of the route table
+    Value: !Ref SecurityPublicRouteTable
+  PrivateRouteTableID:
+    Description: ID of the route table
+    Value: !Ref SecurityPrivateRouteTable
+  PrivateRouteID:
+    Description: ID of the route for the private route table
+    Value: !Ref PrivateRouteToNATRoute
+  PublicRouteID:
+    Description: ID of the route for the private route table
+    Value: !Ref PublicRouteToIGW
+  PrivateRouteAssociationID:
+    Description: ID of the route association for the private route table
+    Value: !Ref PrivateRouteAssociation
+  PublicRouteAssociationID:
+    Description: ID of the route association for the private route table
+    Value: !Ref PublicRouteTableAssociation
+  SecurityGroupID:
+    Description: Id for the security group to allow outbound traffic
+    Value: !Ref AllowOutboundTrafficSG
+  Ec2RoleName:
+    Description: Name for the role used by the servers' instance profile
+    Value: !Ref SecurityEc2SsmRole
+  InstanceProfileName:
+    Description: Name for the servers' instance profile, same for both servers
+    Value: !Ref SecurityInstanceProfile
+  ScannerInstanceID:
+    Description: The ID of the scanner server
+    Value: !Ref SecurityEC2Scanner
+  ScanneeInstanceID:
+    Description: The ID of the scannee server
+    Value: !Ref SecurityEC2Scannee
