@@ -54,19 +54,9 @@ Resources:
   #####################################
   # GuardDuty
   #####################################
-  ### NEED TO ENABLE RUNTIME EC2 SCANNING
   SecurityAccountGuardDuty:
     Type: AWS::GuardDuty::Detector
     Properties:
-      # DataSources: 
-      #     Kubernetes: 
-      #       AuditLogs:
-      #         Enable: false
-      #     MalwareProtection: 
-      #         ScanEc2InstanceWithFindings: 
-      #           EbsVolumes: true
-      #     S3Logs: 
-      #       Enable: true
       Enable: true
       Features: 
         - Name: RUNTIME_MONITORING
@@ -304,8 +294,6 @@ Resources:
         !/bin/bash -ex
         dnf update
         dnf install nmap
-
-      #   nmap -sV 10.0.0.0/24
       Tags: 
         - Key: Feature
           Value: security-tooling
@@ -332,6 +320,10 @@ Resources:
         - Key: Name
           Value: SecurityClientServer
   
+  #####################################
+  # SSM Association to run regular scans to test GD
+  #####################################
+
   #####################################
   # EventBridge Scheduler
   #####################################
