@@ -72,6 +72,32 @@ Resources:
           Value: security
 
   #####################################
+  # Security Hub
+  #####################################
+  SecurityAccountSecurityHub:
+    Type: AWS::SecurityHub::Hub
+    Properties:
+      ControlFindingGenerator: SECURITY_CONTROL
+      EnableDefaultStandards: false
+      Tags:
+        Feature: security-tooling
+        Department: security
+        # - Key: Feature
+        #   Value: security-tooling
+        # - Key: Department
+        #   Value: security
+
+  AwsBestPracticesSecurityStandard:
+    Type: AWS::SecurityHub::Standard
+    Properties:
+      StandardsArn: 'arn:aws:securityhub:us-west-2::standards/aws-foundational-security-best-practices/v/1.0.0'
+
+  Cis30SecurityStandard:
+    Type: AWS::SecurityHub::Standard
+    Properties:
+      StandardsArn: 'arn:aws:securityhub:us-west-2::standards/cis-aws-foundations-benchmark/v/3.0.0'
+
+  #####################################
   # VPC
   #####################################
   SecurityVPC:
@@ -80,7 +106,6 @@ Resources:
       CidrBlock: !Ref VpcCidr
       EnableDnsHostnames: true
       EnableDnsSupport: true
-      # InstanceTenacy: default
       Tags: 
         - Key: Feature
           Value: security-tooling
@@ -254,6 +279,25 @@ Resources:
         - Key: Department
           Value: security
 
+  AllowInboundTraffic:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: AllowInboundTraffic
+      GroupDescription: Allows all inbound traffic to port 22
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: '0.0.0.0/0'
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: '0.0.0.0/0'
+      VpcId: !Ref SecurityVPC
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+
+
   #####################################
   # EC2 Session Manager Role
   #####################################
@@ -310,7 +354,7 @@ Resources:
       InstanceType: t2.micro
       Monitoring: false
       SecurityGroupIds:
-        - !Ref AllowOutboundTrafficSG
+        - !Ref AllowInboundTraffic
       SubnetId: !Ref SecurityPrivateSubnet
       Tags: 
         - Key: Feature
@@ -332,6 +376,9 @@ Outputs:
   GuardDutyID:
     Description: The Detector ID for GuardDuty
     Value: !Ref SecurityAccountGuardDuty
+  SecurityHubArn:
+    Description: The Arn for security hub 
+    Value: !Ref SecurityAccountSecurityHub
   VPCID:
     Description: The ID of the security VPC
     Value: !Ref SecurityVPC
