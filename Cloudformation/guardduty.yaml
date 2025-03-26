@@ -82,20 +82,18 @@ Resources:
       Tags:
         Feature: security-tooling
         Department: security
-        # - Key: Feature
-        #   Value: security-tooling
-        # - Key: Department
-        #   Value: security
 
   AwsBestPracticesSecurityStandard:
     Type: AWS::SecurityHub::Standard
     Properties:
       StandardsArn: 'arn:aws:securityhub:us-west-2::standards/aws-foundational-security-best-practices/v/1.0.0'
+    DependsOn: "SecurityAccountSecurityHub"
 
   Cis30SecurityStandard:
     Type: AWS::SecurityHub::Standard
     Properties:
       StandardsArn: 'arn:aws:securityhub:us-west-2::standards/cis-aws-foundations-benchmark/v/3.0.0'
+    DependsOn: "SecurityAccountSecurityHub"
 
   #####################################
   # VPC
@@ -334,10 +332,19 @@ Resources:
       SecurityGroupIds:
         - !Ref AllowOutboundTrafficSG
       SubnetId: !Ref SecurityPrivateSubnet
-      UserData: !Base64 |
-        !/bin/bash -ex
-        dnf update
-        dnf install nmap
+      Metadata:
+        AWS::Cloudformation::Init:
+          config:
+            packages:
+              nmap: nmap
+            commands:
+              scan: nmap --help
+              sca1n: nmap -sV --script ssh-brute 
+      # UserData: !Base64 |
+      #   #cloud-config
+      #   package_update: true
+      #   packages:
+      #   - nmap
       Tags: 
         - Key: Feature
           Value: security-tooling
