@@ -319,7 +319,31 @@ Resources:
   #####################################
   # EC2 Servers - Scanner and Scanee
   #####################################
-  # this scanner runs a 5 minute long nmap scan and should populate events in GuardDuty/Security Hub
+  # EC2 Scannee
+  SecurityEC2Scannee:
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile: !Ref SecurityInstanceProfile
+      ImageId: !Ref EC2AmiId
+      InstanceType: t2.micro
+      Monitoring: false
+      SecurityGroupIds:
+        - !Ref AllowInboundTraffic
+      SubnetId: !Ref SecurityPrivateSubnet
+      UserData: !Base64 |
+        #cloud-config
+        runcmd:
+        - [sh, -c, 'sed -i "s/PasswordAuthentication no/PasswordAuthentication yes/" /etc/ssh/sshd_config']
+        - [sh, -c, 'cat /etc/ssh/sshd_config | grep "PasswordAuthentication"']
+        - [sh, -c, 'systemctl restart sshd.service']
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityClientServer
+    # this scanner runs a 5 minute long nmap scan and should populate events in GuardDuty/Security Hub
   SecurityEC2Scanner: 
     Type: AWS::EC2::Instance
     Properties:
@@ -336,8 +360,8 @@ Resources:
         packages:
         - nmap
         runcmd:
-        - [sh, -c, 'sleep 45s']
-        - [sh, -c, 'nmap -sV --script ssh-brute 10.0.2.0/24' --script-timeout 300]
+        - [sh, -c, 'sleep 90s']
+        - [sh, -c, 'nmap -sV --script ssh-brute 10.0.2.0/24 --script-timeout 300']
       Tags: 
         - Key: Feature
           Value: security-tooling
@@ -345,31 +369,7 @@ Resources:
           Value: security
         - Key: Name
           Value: SecurityNmapScanner
-      DependsOn: "SecurityEC2Scannee"
-  # EC2 Scannee
-  SecurityEC2Scannee:
-    Type: AWS::EC2::Instance
-    Properties:
-      IamInstanceProfile: !Ref SecurityInstanceProfile
-      ImageId: !Ref EC2AmiId
-      InstanceType: t2.micro
-      Monitoring: false
-      SecurityGroupIds:
-        - !Ref AllowInboundTraffic
-      SubnetId: !Ref SecurityPrivateSubnet
-      UserData: !Base64 |
-        #cloud-config
-        runcmd:
-        - [sh, -c, 'sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config']
-        - [sh, -c, 'cat /etc/ssh/sshd_config | grep "PasswordAuthentication']
-        - [sh, -c, 'systemctl restart sshd.service']
-      Tags: 
-        - Key: Feature
-          Value: security-tooling
-        - Key: Department
-          Value: security
-        - Key: Name
-          Value: SecurityClientServer
+    DependsOn: "SecurityEC2Scannee"
 
   #####################################
   # EventBridge Scheduler
