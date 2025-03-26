@@ -4,9 +4,6 @@ AWSTemplateFormatVersion: 2010-09-09
 Description:
   This template will deploy the infrastructure needed to test GuardDuty. The test is that GD will alert to a network scan across the local infrastructure.
 
-# Metadata:
-#   template metadata
-
 Parameters:
   DeleteInXHours:
     Description: Setting to true will create infrastructure needed to delete the stack and it's infrastructure two hours after deployment.
@@ -320,9 +317,10 @@ Resources:
         - !Ref SecurityEc2SsmRole
 
   #####################################
-  # EC2 Scanner
+  # EC2 Servers - Scanner and Scanee
   #####################################
-  SecurityEC2Scanner:
+  # this scanner runs a 5 minute long nmap scan and should populate events in GuardDuty/Security Hub
+  SecurityEC2Scanner: 
     Type: AWS::EC2::Instance
     Properties:
       IamInstanceProfile: !Ref SecurityInstanceProfile
@@ -332,19 +330,14 @@ Resources:
       SecurityGroupIds:
         - !Ref AllowOutboundTrafficSG
       SubnetId: !Ref SecurityPrivateSubnet
-      Metadata:
-        AWS::Cloudformation::Init:
-          config:
-            packages:
-              nmap: nmap
-            commands:
-              scan: nmap --help
-              sca1n: nmap -sV --script ssh-brute 
-      # UserData: !Base64 |
-      #   #cloud-config
-      #   package_update: true
-      #   packages:
-      #   - nmap
+      UserData: !Base64 |
+        #cloud-config
+        package_update: true
+        packages:
+        - nmap
+        runcmd:
+        - [sh, -c, 'sleep 45s']
+        - [sh, -c, 'nmap -sV --script ssh-brute 10.0.2.0/24' --script-timeout 300]
       Tags: 
         - Key: Feature
           Value: security-tooling
@@ -352,6 +345,7 @@ Resources:
           Value: security
         - Key: Name
           Value: SecurityNmapScanner
+      DependsOn: "SecurityEC2Scannee"
   # EC2 Scannee
   SecurityEC2Scannee:
     Type: AWS::EC2::Instance
@@ -363,6 +357,12 @@ Resources:
       SecurityGroupIds:
         - !Ref AllowInboundTraffic
       SubnetId: !Ref SecurityPrivateSubnet
+      UserData: !Base64 |
+        #cloud-config
+        runcmd:
+        - [sh, -c, 'sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config']
+        - [sh, -c, 'cat /etc/ssh/sshd_config | grep "PasswordAuthentication']
+        - [sh, -c, 'systemctl restart sshd.service']
       Tags: 
         - Key: Feature
           Value: security-tooling
@@ -370,10 +370,6 @@ Resources:
           Value: security
         - Key: Name
           Value: SecurityClientServer
-  
-  #####################################
-  # SSM Association to run regular scans to test GD
-  #####################################
 
   #####################################
   # EventBridge Scheduler
