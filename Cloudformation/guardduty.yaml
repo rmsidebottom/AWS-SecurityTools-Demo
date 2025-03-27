@@ -4,9 +4,6 @@ AWSTemplateFormatVersion: 2010-09-09
 Description:
   This template will deploy the infrastructure needed to test GuardDuty. The test is that GD will alert to a network scan across the local infrastructure.
 
-# Metadata:
-#   template metadata
-
 Parameters:
   DeleteInXHours:
     Description: Setting to true will create infrastructure needed to delete the stack and it's infrastructure two hours after deployment.
@@ -82,20 +79,18 @@ Resources:
       Tags:
         Feature: security-tooling
         Department: security
-        # - Key: Feature
-        #   Value: security-tooling
-        # - Key: Department
-        #   Value: security
 
   AwsBestPracticesSecurityStandard:
     Type: AWS::SecurityHub::Standard
     Properties:
       StandardsArn: 'arn:aws:securityhub:us-west-2::standards/aws-foundational-security-best-practices/v/1.0.0'
+    DependsOn: "SecurityAccountSecurityHub"
 
   Cis30SecurityStandard:
     Type: AWS::SecurityHub::Standard
     Properties:
       StandardsArn: 'arn:aws:securityhub:us-west-2::standards/cis-aws-foundations-benchmark/v/3.0.0'
+    DependsOn: "SecurityAccountSecurityHub"
 
   #####################################
   # VPC
@@ -322,29 +317,8 @@ Resources:
         - !Ref SecurityEc2SsmRole
 
   #####################################
-  # EC2 Scanner
+  # EC2 Servers - Scanner and Scanee
   #####################################
-  SecurityEC2Scanner:
-    Type: AWS::EC2::Instance
-    Properties:
-      IamInstanceProfile: !Ref SecurityInstanceProfile
-      ImageId: !Ref EC2AmiId
-      InstanceType: t2.micro
-      Monitoring: false
-      SecurityGroupIds:
-        - !Ref AllowOutboundTrafficSG
-      SubnetId: !Ref SecurityPrivateSubnet
-      UserData: !Base64 |
-        !/bin/bash -ex
-        dnf update
-        dnf install nmap
-      Tags: 
-        - Key: Feature
-          Value: security-tooling
-        - Key: Department
-          Value: security
-        - Key: Name
-          Value: SecurityNmapScanner
   # EC2 Scannee
   SecurityEC2Scannee:
     Type: AWS::EC2::Instance
@@ -356,6 +330,12 @@ Resources:
       SecurityGroupIds:
         - !Ref AllowInboundTraffic
       SubnetId: !Ref SecurityPrivateSubnet
+      UserData: !Base64 |
+        #cloud-config
+        runcmd:
+        - [sh, -c, 'sed -i "s/PasswordAuthentication no/PasswordAuthentication yes/" /etc/ssh/sshd_config']
+        - [sh, -c, 'cat /etc/ssh/sshd_config | grep "PasswordAuthentication"']
+        - [sh, -c, 'systemctl restart sshd.service']
       Tags: 
         - Key: Feature
           Value: security-tooling
@@ -363,10 +343,33 @@ Resources:
           Value: security
         - Key: Name
           Value: SecurityClientServer
-  
-  #####################################
-  # SSM Association to run regular scans to test GD
-  #####################################
+    # this scanner runs a 5 minute long nmap scan and should populate events in GuardDuty/Security Hub
+  SecurityEC2Scanner: 
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile: !Ref SecurityInstanceProfile
+      ImageId: !Ref EC2AmiId
+      InstanceType: t2.micro
+      Monitoring: false
+      SecurityGroupIds:
+        - !Ref AllowOutboundTrafficSG
+      SubnetId: !Ref SecurityPrivateSubnet
+      UserData: !Base64 |
+        #cloud-config
+        package_update: true
+        packages:
+        - nmap
+        runcmd:
+        - [sh, -c, 'sleep 90s']
+        - [sh, -c, 'nmap -sV --script ssh-brute 10.0.2.0/24 --script-timeout 300']
+      Tags: 
+        - Key: Feature
+          Value: security-tooling
+        - Key: Department
+          Value: security
+        - Key: Name
+          Value: SecurityNmapScanner
+    DependsOn: "SecurityEC2Scannee"
 
   #####################################
   # EventBridge Scheduler
